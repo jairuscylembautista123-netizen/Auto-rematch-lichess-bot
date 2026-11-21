@@ -1,0 +1,79 @@
+name: Auto Rematch WorstFish
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+concurrency:
+  group: auto-rematch-worstfish
+  cancel-in-progress: true
+
+jobs:
+  rematch-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Run Auto-Rematch Loop (5h 25m)
+        continue-on-error: true
+        env:
+          LICHESS_BOT: ${{ secrets.LICHESS_BOT }}
+        run: |
+          timeout -s INT 19500 python -u -c '
+          import os
+          import time
+          import requests
+
+          token = os.environ["LICHESS_BOT"]
+          target_bot = "WorstFish"
+          headers = {"Authorization": "Bearer " + token}
+
+          def send_challenge():
+              r = requests.post(
+                  f"https://lichess.org{target_bot}",
+                  headers=headers,
+                  data={
+                      "rated": "false",
+                      "clock.limit": 1200,
+                      "clock.increment": 0,
+                      "variant": "standard",
+                  },
+              )
+              print("Challenge sent:", r.status_code)
+
+          def is_playing():
+              r = requests.get("https://lichess.org", headers=headers)
+              if r.status_code == 200:
+                  games = r.json().get("nowPlaying", [])
+                  return len(games) > 0
+              return True
+
+          while True:
+              try:
+                  if not is_playing():
+                      print("No active game! Challenging", target_bot)
+                      send_challenge()
+                      time.sleep(15)
+                  else:
+                      print("Still battling... checking again in 20s")
+                      time.sleep(20)
+              except Exception as e:
+                  print("Error:", e)
+                  time.sleep(15)
+          '
+
+      - name: Trigger next workflow run
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          sleep 10
+          gh workflow run "${{ github.workflow }}" --repo ${{ github.repository }}
