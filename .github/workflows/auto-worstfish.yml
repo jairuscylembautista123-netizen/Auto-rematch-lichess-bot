@@ -47,23 +47,28 @@ jobs:
                       "variant": "standard",
                   },
               )
-              print("Challenge sent:", r.status_code)
+              print("Challenge response:", r.status_code, r.text)
 
-          def is_playing():
+          def is_playing_worstfish():
               r = requests.get("https://lichess.org", headers=headers)
               if r.status_code == 200:
                   games = r.json().get("nowPlaying", [])
-                  return len(games) > 0
-              return True
+                  for g in games:
+                      opp = g.get("opponent", {}).get("id", "").lower()
+                      if opp == target_bot.lower():
+                          return True
+                  return False
+              print("API check status:", r.status_code)
+              return False
 
           while True:
               try:
-                  if not is_playing():
-                      print("No active game! Challenging", target_bot)
+                  if not is_playing_worstfish():
+                      print("Not currently playing WorstFish! Sending challenge...")
                       send_challenge()
-                      time.sleep(15)
+                      time.sleep(20)
                   else:
-                      print("Still battling... checking again in 20s")
+                      print("Still battling WorstFish... checking again in 20s")
                       time.sleep(20)
               except Exception as e:
                   print("Error:", e)
