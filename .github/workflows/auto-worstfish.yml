@@ -33,12 +33,16 @@ jobs:
           import requests
 
           token = os.environ["LICHESS_BOT"]
+          my_bot = "WorserFish19"
           target_bot = "WorstFish"
+          s = chr(47)
+          base = "https:" + s + s + "lichess.org" + s + "api"
           headers = {"Authorization": "Bearer " + token}
 
           def send_challenge():
+              url = base + s + "challenge" + s + target_bot
               r = requests.post(
-                  f"https://lichess.org{target_bot}",
+                  url,
                   headers=headers,
                   data={
                       "rated": "false",
@@ -49,26 +53,25 @@ jobs:
               )
               print("Challenge response:", r.status_code, r.text)
 
-          def is_playing_worstfish():
-              r = requests.get("https://lichess.org", headers=headers)
+          def is_playing():
+              url = base + s + "users" + s + "status?ids=" + my_bot
+              r = requests.get(url)
               if r.status_code == 200:
-                  games = r.json().get("nowPlaying", [])
-                  for g in games:
-                      opp = g.get("opponent", {}).get("id", "").lower()
-                      if opp == target_bot.lower():
-                          return True
+                  data = r.json()
+                  if data and data[0].get("playing"):
+                      return True
                   return False
-              print("API check status:", r.status_code)
+              print("Status check error:", r.status_code)
               return False
 
           while True:
               try:
-                  if not is_playing_worstfish():
-                      print("Not currently playing WorstFish! Sending challenge...")
+                  if not is_playing():
+                      print(my_bot, "is free! Challenging", target_bot)
                       send_challenge()
                       time.sleep(20)
                   else:
-                      print("Still battling WorstFish... checking again in 20s")
+                      print("Still battling... checking again in 20s")
                       time.sleep(20)
               except Exception as e:
                   print("Error:", e)
