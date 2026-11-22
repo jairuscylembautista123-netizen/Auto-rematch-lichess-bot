@@ -3,11 +3,7 @@ name: Auto Rematch Worstfish
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Backup trigger every 6 hours
-
-permissions:
-  actions: write
-  contents: read
+    - cron: '0 */6 * * *'
 
 concurrency:
   group: auto-rematch-worstfish
@@ -18,29 +14,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 345
     steps:
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Install requests
-        run: pip install requests
+        run: python3 -m pip install -q requests
 
-      - name: Run Auto-Rematch Loop (5h 25m)
+      - name: Run Auto-Rematch Loop (5h 20m)
         continue-on-error: true
         env:
           LICHESS_BOT: ${{ secrets.LICHESS_BOT }}
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
         run: |
-          python -u -c '
+          python3 -u -c '
           import os
           import time
           import requests
 
           token = os.environ["LICHESS_BOT"]
-          gh_token = os.environ["GH_TOKEN"]
-          repo = os.environ["REPO"]
           my_bot = "WorserFish19"
           target_bot = "WorstFish"
           s = chr(47)
@@ -48,19 +35,7 @@ jobs:
           headers = {"Authorization": "Bearer " + token}
 
           start_time = time.time()
-          max_runtime = 19200 # 5h 20m, leaves 5m buffer to trigger next run
-
-          def trigger_next_run():
-              url = f"https://github.com{repo}/actions/workflows/auto-worstfish.yml/dispatches"
-              r = requests.post(
-                  url,
-                  headers={
-                      "Authorization": f"Bearer {gh_token}",
-                      "Accept": "application/vnd.github+json",
-                  },
-                  json={"ref": "main"},
-              )
-              print("Triggered next workflow run:", r.status_code)
+          max_runtime = 19200 # 5h 20m
 
           def send_challenge():
               url = base + s + "challenge" + s + target_bot
@@ -78,7 +53,7 @@ jobs:
               if r.status_code in (400, 429):
                   try:
                       data = r.json()
-                      wait_sec = data.get("ratelimit", {}).get("seconds")
+                      wait_sec = data.get("ratelimit", {}).get("seconds") if isinstance(data, dict) else None
                   except Exception:
                       wait_sec = None
 
@@ -97,7 +72,7 @@ jobs:
               r = requests.get(url)
               if r.status_code == 200:
                   data = r.json()
-                  if data and data.get("playing"):
+                  if isinstance(data, list) and len(data) > 0 and data[0].get("playing"):
                       return True
                   return False
               print("Status check error:", r.status_code)
@@ -116,6 +91,17 @@ jobs:
                   print("Error:", e)
                   time.sleep(15)
 
-          print("5h 20m reached! Auto-restarting workflow...")
-          trigger_next_run()
+          print("5h 20m reached! Handing off to restart step...")
           '
+
+      - name: Auto-Restart Next Run
+        if: always()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          curl -i -s -X POST \
+            -H "Authorization: Bearer $GH_PAT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://github.com" \
+            -d '{"ref":"main"}'
