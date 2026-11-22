@@ -3,11 +3,15 @@ name: Auto Rematch Worstfish
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Runs at 0 minutes past the hour, every 6 hours
+    - cron: '0 */6 * * *' # Backup trigger every 6 hours
+
+permissions:
+  actions: write
+  contents: read
 
 concurrency:
   group: auto-rematch-worstfish
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   rematch-loop:
@@ -26,21 +30,37 @@ jobs:
         continue-on-error: true
         env:
           LICHESS_BOT: ${{ secrets.LICHESS_BOT }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          timeout -s INT 19500 python -u -c '
+          python -u -c '
           import os
-          import sys
           import time
           import requests
 
           token = os.environ["LICHESS_BOT"]
+          gh_token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
           my_bot = "WorserFish19"
           target_bot = "WorstFish"
           s = chr(47)
           base = "https:" + s + s + "lichess.org" + s + "api"
           headers = {"Authorization": "Bearer " + token}
+
           start_time = time.time()
-          max_runtime = 19500
+          max_runtime = 19200 # 5h 20m, leaves 5m buffer to trigger next run
+
+          def trigger_next_run():
+              url = f"https://github.com{repo}/actions/workflows/auto-worstfish.yml/dispatches"
+              r = requests.post(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {gh_token}",
+                      "Accept": "application/vnd.github+json",
+                  },
+                  json={"ref": "main"},
+              )
+              print("Triggered next workflow run:", r.status_code)
 
           def send_challenge():
               url = base + s + "challenge" + s + target_bot
@@ -63,12 +83,11 @@ jobs:
                       wait_sec = None
 
                   if wait_sec is not None:
-                      remaining_job_time = max_runtime - (time.time() - start_time)
-                      if wait_sec + 5 > remaining_job_time:
-                          print(f"Daily rate limit hit ({wait_sec}s remaining), exceeds job window. Exiting cleanly until next cron run.")
-                          sys.exit(0)
-                      print(f"Rate limited! Sleeping for {wait_sec + 5}s...")
-                      time.sleep(wait_sec + 5)
+                      sleep_for = wait_sec + 5
+                      remaining = max_runtime - (time.time() - start_time)
+                      actual_sleep = min(sleep_for, max(0, remaining))
+                      print(f"Rate limited! Sleeping for {int(actual_sleep)}s (full cooldown: {sleep_for}s)...")
+                      time.sleep(actual_sleep)
                   elif r.status_code == 429:
                       print("Rate limited (429)! Sleeping for 65s...")
                       time.sleep(65)
@@ -78,13 +97,13 @@ jobs:
               r = requests.get(url)
               if r.status_code == 200:
                   data = r.json()
-                  if data and data[0].get("playing"):
+                  if data and data.get("playing"):
                       return True
                   return False
               print("Status check error:", r.status_code)
               return False
 
-          while True:
+          while (time.time() - start_time) < max_runtime:
               try:
                   if not is_playing():
                       print(my_bot, "is free! Challenging", target_bot)
@@ -96,4 +115,7 @@ jobs:
               except Exception as e:
                   print("Error:", e)
                   time.sleep(15)
+
+          print("5h 20m reached! Auto-restarting workflow...")
+          trigger_next_run()
           '
